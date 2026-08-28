@@ -1,0 +1,5 @@
+aws_region               = "us-east-1"
+environment              = "dev"
+project_name             = "s3-storage-optimizer"
+scan_schedule_expression = "rate(1 day)"
+
