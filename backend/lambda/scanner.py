@@ -15,6 +15,7 @@ import boto3
 
 from config import AnalysisConfig
 from s3_analyzer import analyze_bucket, is_bucket_error, iter_buckets
+from hygiene_analyzer import analyze_lifecycle, analyze_security, analyze_versions_and_uploads, finding
 
 
 LOGGER = logging.getLogger()
@@ -56,6 +57,10 @@ def _persist_bucket_result(table: Any, scan_id: str, timestamp: str, result: dic
     table.put_item(Item=_to_decimal(item))
 
 
+def _persist_finding(table: Any, scan_id: str, timestamp: str, item: dict[str, Any]) -> None:
+    table.put_item(Item=_to_decimal({"scan_id": scan_id, "record_key": f"FINDING#{item['finding_id']}", "timestamp": timestamp, "bucket": item["bucket"], "finding_id": item["finding_id"], "finding_type": item["type"], "severity": item["severity"], "title": item["title"], "description": item["description"], "recommendation": item["recommendation"]}))
+
+
 def _public_bucket_result(result: dict[str, Any]) -> dict[str, Any]:
     return {
         "name": result["bucket"],
@@ -87,12 +92,20 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     table = boto3.resource("dynamodb").Table(table_name)
     bucket_results: list[dict[str, Any]] = []
     bucket_failures: list[dict[str, str]] = []
+    findings: list[dict[str, Any]] = []
     try:
         for bucket in iter_buckets(s3_client):
             bucket_name = bucket.get("Name", "unknown")
             try:
                 result = analyze_bucket(s3_client, bucket, config)
+                lifecycle, lifecycle_findings = analyze_lifecycle(s3_client, bucket_name)
+                security, security_findings = analyze_security(s3_client, bucket_name)
+                versions, version_findings = analyze_versions_and_uploads(s3_client, bucket_name)
+                duplicate_findings = [finding("POTENTIAL_DUPLICATE", "LOW", bucket_name, "Potential duplicate objects", "Objects have matching size and ETag metadata; this is not proof of identical content.", "Review before deleting any object.", evidence=group) for group in result["duplicate_groups"]]
+                result["hygiene"] = {"lifecycle": lifecycle, "security": security, "versions": versions}
                 _persist_bucket_result(table, scan_id, timestamp, result)
+                for item in lifecycle_findings + security_findings + version_findings + duplicate_findings:
+                    _persist_finding(table, scan_id, timestamp, item); findings.append(item)
                 bucket_results.append(_public_bucket_result(result))
             except Exception as error:
                 if not is_bucket_error(error):
@@ -107,7 +120,8 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         _emit_metric("ScanErrors", len(bucket_failures))
         duration_ms = round((time.monotonic() - started_at) * 1000, 2)
         LOGGER.info(json.dumps({"message": "scan_completed", "scan_id": scan_id, "buckets_scanned": len(bucket_results), "objects_analyzed": total_objects, "duration_ms": duration_ms}))
-        return {"statusCode": 200, "scan_id": scan_id, "timestamp": timestamp, "status": "completed", "buckets_scanned": len(bucket_results), "buckets_failed": len(bucket_failures), "total_objects": total_objects, "total_storage_gb": total_storage_gb, "buckets": bucket_results, "failures": bucket_failures}
+        counts = {level.lower(): sum(item["severity"] == level for item in findings) for level in ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO")}
+        return {"statusCode": 200, "scan_id": scan_id, "timestamp": timestamp, "status": "completed", "summary": {"buckets_scanned": len(bucket_results), "buckets_failed": len(bucket_failures), "total_objects": total_objects, "total_storage_gb": total_storage_gb}, "findings": counts, "recommendations": len(findings), "buckets": bucket_results, "failures": bucket_failures}
     except Exception:
         _emit_metric("ScanErrors", 1)
         LOGGER.exception("scan_failed scan_id=%s", scan_id)

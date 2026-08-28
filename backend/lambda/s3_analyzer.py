@@ -57,6 +57,7 @@ def analyze_bucket(s3_client: Any, bucket: dict[str, Any], config: AnalysisConfi
     storage_class_bytes: dict[str, int] = {}
     age_breakdown: dict[str, int] = {}
     large_objects: list[dict[str, Any]] = []
+    duplicate_candidates: dict[tuple[int, str, str], list[str]] = {}
     object_count = total_size_bytes = 0
     region = get_bucket_region(s3_client, name)
     for page in s3_client.get_paginator("list_objects_v2").paginate(Bucket=name):
@@ -72,6 +73,9 @@ def analyze_bucket(s3_client: Any, bucket: dict[str, Any], config: AnalysisConfi
             age_breakdown[category] = age_breakdown.get(category, 0) + 1
             if size >= config.large_object_bytes and len(large_objects) < config.max_large_object_samples:
                 large_objects.append({"key": item.get("Key", ""), "size": size, "storage_class": storage_class, "last_modified": last_modified.isoformat()})
+            etag = str(item.get("ETag", "")).strip('"')
+            if etag and "-" not in etag:
+                duplicate_candidates.setdefault((size, etag, storage_class), []).append(item.get("Key", ""))
     return {
         "bucket": name,
         "region": region,
@@ -84,6 +88,7 @@ def analyze_bucket(s3_client: Any, bucket: dict[str, Any], config: AnalysisConfi
         "age_breakdown": age_breakdown,
         "large_object_count": len(large_objects),
         "large_objects": large_objects,
+        "duplicate_groups": [{"size": key[0], "etag": key[1], "storage_class": key[2], "keys": keys} for key, keys in duplicate_candidates.items() if len(keys) > 1],
     }
 
 

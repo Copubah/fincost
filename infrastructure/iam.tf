@@ -59,6 +59,7 @@ data "aws_iam_policy_document" "scanner" {
     actions = [
       "s3:ListBucket",
       "s3:ListBucketMultipartUploads",
+      "s3:ListBucketVersions",
     ]
     resources = ["arn:aws:s3:::*"]
   }
@@ -79,4 +80,3 @@ resource "aws_iam_role_policy" "scanner" {
   role   = aws_iam_role.scanner.id
   policy = data.aws_iam_policy_document.scanner.json
 }
-
