@@ -39,3 +39,13 @@ variable "lambda_memory_mb" {
   default     = 256
 }
 
+variable "large_object_mb" {
+  description = "Large-object threshold used by the scanner, in mebibytes."
+  type        = number
+  default     = 500
+
+  validation {
+    condition     = var.large_object_mb > 0
+    error_message = "large_object_mb must be greater than zero."
+  }
+}

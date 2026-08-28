@@ -13,3 +13,7 @@ output "scanner_log_group_name" {
   value       = aws_cloudwatch_log_group.scanner.name
 }
 
+output "phase2_integration_bucket_name" {
+  description = "Dedicated private test bucket for Phase 2 integration checks."
+  value       = aws_s3_bucket.phase2_integration.bucket
+}

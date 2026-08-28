@@ -1,6 +1,6 @@
 data "archive_file" "scanner" {
   type        = "zip"
-  source_file = "${path.module}/../backend/lambda/scanner.py"
+  source_dir  = "${path.module}/../backend/lambda"
   output_path = "${path.module}/lambda_package.zip"
 }
 
@@ -19,6 +19,7 @@ resource "aws_lambda_function" "scanner" {
     variables = {
       ANALYSIS_TABLE_NAME = aws_dynamodb_table.analysis_results.name
       LOG_LEVEL           = "INFO"
+      LARGE_OBJECT_MB     = tostring(var.large_object_mb)
     }
   }
 
@@ -27,4 +28,3 @@ resource "aws_lambda_function" "scanner" {
     aws_iam_role_policy.scanner,
   ]
 }
-
